@@ -76,8 +76,8 @@ struct KiroCLIFetchStrategy: ProviderFetchStrategy {
     }
 
     func fetch(_: ProviderFetchContext) async throws -> ProviderFetchResult {
-        // An unreachable Kiro must not reach the CLI: `kiro-cli` answers a failed session refresh
-        // with interactive browser sign-in, and every refresh tick would open new sign-in tabs.
+        // Check the CLI's own usage service, not the independently hosted dashboard.
+        // A failed session refresh can otherwise open sign-in tabs on every refresh tick.
         try await self.connectivityGate.ensureReachable()
         let snap = try await self.makeProbe().fetch()
         return self.makeResult(
