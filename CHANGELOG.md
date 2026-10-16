@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Kiro: verify Kiro is reachable before a background usage refresh runs `kiro-cli`, so an offline Mac no longer spawns repeated sign-in tabs in the browser.
 - Usage forecasts: restore estimated session quotas and windows until reset when older history contains reset-time corrections (#4540). Thanks @emanuelst!
 - Usage cards: distinguish plan renewal dates from quota resets with “Plan renews” wording across all 23 locales (#4540). Thanks @emanuelst!
 - Cost history: reduce CPU spent scanning large Codex and Claude message bodies without changing parsed usage. (#4552) Thanks @Lucenx9!
