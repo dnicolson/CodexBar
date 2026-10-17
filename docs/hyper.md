@@ -6,10 +6,12 @@ read_when:
 
 # Charm Hyper
 
-Charm Hyper is an opt-in bundled TypeScript provider. A browser session reads the signed-in team dashboard with
-`GET https://hyper.charm.land/` (same-origin redirects land on `/teams/{team}/dashboard`) and shows the Hypercredit
-balance from that page. An API key requests `GET https://hyper.charm.land/v1/credits`,
-which accepts bearer keys only — cookie authentication is rejected there, so cookies are never sent to it.
+Charm Hyper is an opt-in bundled TypeScript provider. A browser session reads the signed-in account through the
+same JSON endpoints the web app uses: `GET https://hyper.charm.land/auth/me` reports whether the cookie still
+authenticates and lists the account's teams, and `GET https://hyper.charm.land/teams/{team}/dashboard` returns the
+Hypercredit balance. The balance shown is the "Hypercredits Available" figure — subscription `remaining` plus
+`prepaid`. An API key requests `GET https://hyper.charm.land/v1/credits`, which accepts bearer keys only — cookie
+authentication is rejected there, so cookies are never sent to it.
 
 ## Authentication
 
@@ -17,10 +19,13 @@ Enable **Settings → Providers → Charm Hyper**. Automatic session access foll
 `hyper.charm.land`; Manual accepts a Cookie header from that domain, and Off uses only the API key.
 Auto prefers the session, falling back to the API key when cookies are missing, the session expires,
 or the session request cannot connect. Malformed successful responses fail visibly without fallback.
-If Chrome is signed in but cookie access needs permission, use **Refresh** beside **Cookie source**.
+If the browser you're signed in with is reachable but cookie access needs permission, use **Refresh** beside
+**Cookie source**.
 A successful browser refresh is reported as `web` and saves the imported session for subsequent refreshes.
 
-A session that does not reach the dashboard is rejected before the API-key fallback. An expired manual
+A session whose `/auth/me` probe is not authenticated is rejected, and the next browser candidate is tried before the
+API-key fallback, so a stale session in one browser never hides a working one in another. An authenticated session
+whose dashboard reports no parseable balance fails visibly instead of guessing. An expired manual
 session asks for a fresh pasted Cookie header; an expired automatic session asks the user to sign in again.
 
 Add an API key in the provider settings or set `HYPER_API_KEY` in the environment that launches CodexBar.
@@ -41,8 +46,8 @@ widgets are not supported.
 Missing credentials produce setup guidance instead of a fabricated zero balance.
 
 The request and parsing contracts are covered by synthetic fixtures on both plugin engines, including the
-dashboard markup shape, redirect/expiry handling, and the API-key response.
+`/auth/me` session probe, team dashboard JSON, expiry handling, and the API-key response.
 
 Public contracts: [Credits API](https://hyper.charm.land/docs/api/credits.html) and
-[Dashboard](https://hyper.charm.land/docs/dashboard.html). The dashboard markup fixture comes from #4435;
-no live account or browser cookies were accessed during maintainer verification.
+[Dashboard](https://hyper.charm.land/docs/dashboard.html). The session and dashboard JSON shapes are mirrored from
+the site's client bundle. No live account or browser cookies were accessed during maintainer verification.

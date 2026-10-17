@@ -13,38 +13,16 @@ struct HyperPluginTests {
     #endif
 
     private static let teamID = "11111111-2222-3333-4444-555555555555"
+    private static let authMeURL = "https://hyper.charm.land/auth/me"
     private static let dashboardURL = "https://hyper.charm.land/teams/\(Self.teamID)/dashboard"
-    private static let landingURL = "https://hyper.charm.land/"
+    private static let creditsURL = "https://hyper.charm.land/v1/credits"
 
-    /// Mirrors the signed-in team dashboard markup: balance card, plan card, refresh note, API key count.
-    private static let dashboardHTML = """
-    <html><head><title>Dashboard — Charm™ Hyper</title></head><body>
-    <div class="rounded-xl bg-card p-5">
-      <p class="text-sm">Hypercredits Available</p>
-      <div class="mt-1 flex items-center gap-1">
-        <img src="/static/hexy.webp" alt="" width="34" height="34" />
-        <p class="text-5xl font-bold">100</p>
-      </div>
-    </div>
-    <div class="rounded-xl bg-card p-5">
-      <p class="text-sm">Plan</p>
-      <p class="text-3xl font-bold">Free</p>
-      <a href="/teams/\(Self.teamID)/billing">Upgrade Plan</a>
-      <p class="text-sm">Next Hypercredit refresh in 1 week</p>
-    </div>
-    <div class="rounded-xl bg-card p-5">
-      <p class="text-sm">API Keys</p>
-      <p class="mt-1 text-5xl font-bold">0</p>
-    </div>
-    </body></html>
-    """
+    /// `GET /auth/me` as the client-rendered app observes a live session: the account's team list.
+    private static let signedIn = #"{"authenticated":true,"teams":[{"id":"\#(teamID)","name":"Fixture","role":"owner"}]}"#
+    private static let signedOut = #"{"authenticated":false}"#
 
-    /// Signed-out marketing page served for a session cookie that no longer authenticates.
-    private static let landingHTML = """
-    <html><head><title>Charm™ Hyper — Built for Coding Agents</title></head><body>
-    <p>Hypercredits per month.</p>
-    </body></html>
-    """
+    /// `GET /teams/{id}/dashboard`: "Hypercredits Available" is subscription remaining plus prepaid.
+    private static let dashboardJSON = #"{"refresh_at":1730000000,"returns_at":0,"now":0,"remaining":60,"prepaid":40,"available":60,"known":true,"limited":false,"subscribed":true}"#
 
     @Test(arguments: Self.engines)
     func `draft balance fixtures retain native HC without fabricated limits`(
@@ -64,24 +42,23 @@ struct HyperPluginTests {
     }
 
     @Test(arguments: Self.engines)
-    func `session dashboard wins over key without a credits request`(engine: ProviderPluginEngineKind) async throws {
+    func `session dashboard sums subscription and prepaid hypercredits`(engine: ProviderPluginEngineKind) async throws {
         let snapshot = try await Self.fetch(
-            engine: engine, cookie: "JSESSIONID=fixture-session",
-            expectedRequests: ["https://hyper.charm.land/"])
+            engine: engine, cookie: "session=fixture-session",
+            expectedRequests: [Self.authMeURL, Self.dashboardURL])
         #expect(snapshot.details.first?.rows.first?.usageValue == 100)
         #expect(snapshot.details.first?.rows.first?.value == "100 HC")
         #expect(snapshot.identity?.loginMethod == "Browser session")
         #expect(snapshot.dataConfidence == .exact)
         #expect(snapshot.primary == nil)
-        let labels = (snapshot.details.first?.rows ?? []).map(\.label)
-        #expect(labels == ["Balance"])
+        #expect((snapshot.details.first?.rows ?? []).map(\.label) == ["Balance"])
     }
 
     @Test(arguments: Self.engines)
     func `automatic browser session works without an API key`(engine: ProviderPluginEngineKind) async throws {
         let snapshot = try await Self.fetch(
-            engine: engine, key: "", cookie: "JSESSIONID=fixture-session", cookieSource: .auto,
-            expectedRequests: [Self.landingURL])
+            engine: engine, key: "", cookie: "session=fixture-session", cookieSource: .auto,
+            expectedRequests: [Self.authMeURL, Self.dashboardURL])
         #expect(snapshot.details.first?.rows.first?.usageValue == 100)
         #expect(snapshot.identity?.loginMethod == "Browser session")
     }
@@ -99,35 +76,33 @@ struct HyperPluginTests {
     }
 
     @Test(arguments: [
-        (401, Self.dashboardHTML, Self.dashboardURL),
-        (403, Self.dashboardHTML, Self.dashboardURL),
-        (302, Self.landingHTML, Self.landingURL),
-        (200, Self.landingHTML, Self.landingURL),
+        (200, Self.signedOut),
+        (401, #"{}"#),
+        (500, #"{}"#),
     ], Self.engines)
     func `expired session is rejected before API fallback`(
-        fixture: (Int, String, String),
+        fixture: (Int, String),
         engine: ProviderPluginEngineKind) async throws
     {
         let snapshot = try await Self.fetch(
             engine: engine, cookie: "session=fixture-rejected-session",
-            sessionStatus: fixture.0, sessionBody: fixture.1, sessionURL: fixture.2)
+            authMeStatus: fixture.0, authMeBody: fixture.1)
         #expect(snapshot.identity?.loginMethod == "API key")
     }
 
     @Test(arguments: [
-        (401, Self.dashboardHTML, Self.dashboardURL),
-        (403, Self.dashboardHTML, Self.dashboardURL),
-        (302, Self.landingHTML, Self.landingURL),
-        (200, Self.landingHTML, Self.landingURL),
+        (200, Self.signedOut),
+        (401, #"{}"#),
+        (500, #"{}"#),
     ], Self.engines)
     func `web only never falls back to configured key`(
-        fixture: (Int, String, String),
+        fixture: (Int, String),
         engine: ProviderPluginEngineKind) async
     {
         do {
             _ = try await Self.fetch(
                 engine: engine, cookie: "session=fixture-rejected-session", mode: .web,
-                sessionStatus: fixture.0, sessionBody: fixture.1, sessionURL: fixture.2)
+                authMeStatus: fixture.0, authMeBody: fixture.1)
             Issue.record("Expected expired session")
         } catch let error as ProviderFetchClassifiedError {
             #expect(error.kind == .authenticationExpired)
@@ -145,7 +120,7 @@ struct HyperPluginTests {
         do {
             _ = try await Self.fetch(
                 engine: engine, key: "", cookie: "session=fixture-expired", cookieSource: expected.0,
-                sessionStatus: 200, sessionBody: Self.landingHTML, sessionURL: Self.landingURL)
+                authMeBody: Self.signedOut)
             Issue.record("Expected expired session")
         } catch let error as ProviderFetchClassifiedError {
             #expect(error.kind == .authenticationExpired)
@@ -153,27 +128,20 @@ struct HyperPluginTests {
         } catch { Issue.record("Unexpected error: \(error)") }
     }
 
-    @Test(arguments: Self.engines)
-    func `dashboard without a balance card fails closed instead of guessing`(engine: ProviderPluginEngineKind) async {
-        let body = """
-        <html><body><a href="/teams/\(Self.teamID)/dashboard">Dashboard</a>
-        <p class="text-sm">Hypercredits Available</p></body></html>
-        """
+    @Test(arguments: [
+        #"{}"#,
+        #"{"returns_at":1730000000}"#,
+        #"{"remaining":"100"}"#,
+        #"{"remaining":1e400}"#,
+        #"{"remaining":null,"prepaid":null}"#,
+    ], Self.engines)
+    func `dashboard without a parseable balance fails closed instead of guessing`(
+        body: String,
+        engine: ProviderPluginEngineKind) async
+    {
         do {
             _ = try await Self.fetch(
-                engine: engine, cookie: "session=fixture", sessionBody: body, sessionURL: Self.dashboardURL)
-            Issue.record("Expected parse failure")
-        } catch let error as ProviderFetchClassifiedError {
-            #expect(error.kind == .parseFailure)
-        } catch { Issue.record("Unexpected error: \(error)") }
-    }
-
-    @Test(arguments: Self.engines)
-    func `dashboard balance rejects a numeric prefix of malformed text`(engine: ProviderPluginEngineKind) async {
-        do {
-            _ = try await Self.fetch(
-                engine: engine, cookie: "session=fixture", mode: .web,
-                sessionBody: Self.dashboardHTML.replacingOccurrences(of: ">100<", with: ">100oops<"))
+                engine: engine, cookie: "session=fixture", mode: .web, dashboardBody: body)
             Issue.record("Expected parse failure")
         } catch let error as ProviderFetchClassifiedError {
             #expect(error.kind == .parseFailure)
@@ -258,6 +226,115 @@ struct HyperPluginTests {
         }
     }
 
+    @Test(arguments: Self.engines)
+    func `stale session candidates advance to a later browser within one refresh`(
+        engine: ProviderPluginEngineKind) async throws
+    {
+        let sessions = HyperSessionTrace(headers: ["session=stale-fixture", "session=live-fixture"])
+        let runtime = try Self.runtime(engine: engine, transport: ProviderHTTPTransportHandler { request in
+            let url = try #require(request.url)
+            let header = request.value(forHTTPHeaderField: "Cookie") ?? ""
+            if url.absoluteString == Self.authMeURL {
+                sessions.request(header)
+                let stale = header.contains("stale-fixture")
+                let response = try #require(HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]))
+                return (Data((stale ? Self.signedOut : Self.signedIn).utf8), response)
+            }
+            #expect(url.absoluteString == Self.dashboardURL)
+            #expect(header == "session=live-fixture")
+            let response = try #require(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]))
+            return (Data(Self.dashboardJSON.utf8), response)
+        })
+        let result = try await runtime.fetchResult(
+            settings: ["SOURCE_MODE": ProviderSourceMode.auto.rawValue], secrets: ["HYPER_API_KEY": ""],
+            sourceMode: .auto, cookieSource: .auto,
+            cookieSessionResolver: { domain, _ in
+                #expect(domain == "hyper.charm.land")
+                return sessions.next()
+            },
+            cookieSessionInvalidator: { domain, id in
+                #expect(domain == "hyper.charm.land")
+                sessions.reject(id)
+            })
+        #expect(result.usage.details.first?.rows.first?.usageValue == 100)
+        #expect(result.usage.identity?.loginMethod == "Browser session")
+        #expect(result.sourceLabel == "web")
+        #expect(sessions.requested == ["session=stale-fixture", "session=live-fixture"])
+        #expect(sessions.rejected == [sessions.candidates[0].id])
+    }
+
+    @Test(arguments: Self.engines)
+    func `every rejected candidate falls back to the configured API key`(
+        engine: ProviderPluginEngineKind) async throws
+    {
+        let sessions = HyperSessionTrace(headers: ["session=stale-one", "session=stale-two"])
+        let runtime = try Self.runtime(engine: engine, transport: ProviderHTTPTransportHandler { request in
+            let url = try #require(request.url)
+            if url.absoluteString == Self.authMeURL {
+                sessions.request(request.value(forHTTPHeaderField: "Cookie") ?? "")
+                let response = try #require(HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]))
+                return (Data(Self.signedOut.utf8), response)
+            }
+            #expect(url.absoluteString == Self.creditsURL)
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-key")
+            let response = try #require(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"]))
+            return (Data(#"{"balance":42.5}"#.utf8), response)
+        })
+        let result = try await runtime.fetchResult(
+            settings: ["SOURCE_MODE": ProviderSourceMode.auto.rawValue], secrets: ["HYPER_API_KEY": "fixture-key"],
+            sourceMode: .auto, cookieSource: .auto,
+            cookieSessionResolver: { _, _ in sessions.next() },
+            cookieSessionInvalidator: { _, id in sessions.reject(id) })
+        #expect(result.usage.identity?.loginMethod == "API key")
+        #expect(result.sourceLabel == "api")
+        #expect(sessions.requested == ["session=stale-one", "session=stale-two"])
+        #expect(sessions.rejected == sessions.candidates.map(\.id))
+    }
+
+    @Test(arguments: Self.engines)
+    func `manual source stops after the pasted candidate`(engine: ProviderPluginEngineKind) async throws {
+        let sessions = HyperSessionTrace(headers: ["session=stale-one", "session=stale-two"])
+        let runtime = try Self.runtime(engine: engine, transport: ProviderHTTPTransportHandler { request in
+            let url = try #require(request.url)
+            #expect(url.absoluteString == Self.authMeURL)
+            #expect(request.value(forHTTPHeaderField: "Cookie") == "session=stale-one")
+            sessions.request(request.value(forHTTPHeaderField: "Cookie") ?? "")
+            let response = try #require(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]))
+            return (Data(Self.signedOut.utf8), response)
+        })
+        do {
+            _ = try await runtime.fetchResult(
+                settings: ["SOURCE_MODE": ProviderSourceMode.auto.rawValue], secrets: ["HYPER_API_KEY": ""],
+                sourceMode: .auto, cookieSource: .manual,
+                cookieSessionResolver: { _, _ in sessions.next() },
+                cookieSessionInvalidator: { _, id in sessions.reject(id) })
+            Issue.record("Expected expired session")
+        } catch let error as ProviderFetchClassifiedError {
+            #expect(error.kind == .authenticationExpired)
+            #expect(error.message.contains("Paste a fresh Cookie header"))
+        }
+        #expect(sessions.consumed == 1)
+        #expect(sessions.rejected == [sessions.candidates[0].id])
+    }
+
+    private static func runtime(
+        engine: ProviderPluginEngineKind,
+        transport: ProviderHTTPTransportHandler) throws -> ProviderPluginRuntime
+    {
+        let url = try #require(CodexBarCoreResources.bundle?.url(forResource: "hyper", withExtension: "js"))
+        return try ProviderPluginRuntime(
+            source: String(contentsOf: url, encoding: .utf8), transport: transport, engine: engine)
+    }
+
     private static func fetch(
         engine: ProviderPluginEngineKind,
         apiBody: String = #"{"balance":42.5}"#,
@@ -265,9 +342,10 @@ struct HyperPluginTests {
         cookie: String? = nil,
         cookieSource: ProviderCookieSource? = nil,
         mode: ProviderSourceMode = .auto,
-        sessionStatus: Int = 200,
-        sessionBody: String = Self.dashboardHTML,
-        sessionURL: String = Self.dashboardURL,
+        authMeStatus: Int = 200,
+        authMeBody: String = Self.signedIn,
+        dashboardStatus: Int = 200,
+        dashboardBody: String = Self.dashboardJSON,
         apiStatus: Int = 200,
         expectedRequests: [String]? = nil) async throws -> UsageSnapshot
     {
@@ -275,19 +353,27 @@ struct HyperPluginTests {
         let requests = HyperRequestRecorder()
         let source = cookieSource ?? (cookie == nil ? .off : .manual)
         let expectsSession = cookie?.isEmpty == false && mode != .api && source != .off
-        let sessionSucceeded = expectsSession && sessionStatus == 200 && sessionBody.contains("/teams/\(Self.teamID)")
+        let sessionSucceeded = expectsSession && authMeStatus == 200 && authMeBody.contains("\"authenticated\":true")
         let transport = ProviderHTTPTransportHandler { request in
             let url = try #require(request.url)
             requests.record(url.absoluteString)
-            if url.absoluteString == "https://hyper.charm.land/" {
+            if url.absoluteString == "https://hyper.charm.land/auth/me" {
                 #expect(expectsSession)
                 #expect(request.value(forHTTPHeaderField: "Cookie") == cookie)
                 #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
-                #expect(request.value(forHTTPHeaderField: "Accept") == "text/html")
+                #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
                 let response = try #require(HTTPURLResponse(
-                    url: URL(string: sessionURL) ?? url, statusCode: sessionStatus, httpVersion: nil,
-                    headerFields: ["Content-Type": "text/html; charset=utf-8"]))
-                return (Data(sessionBody.utf8), response)
+                    url: url, statusCode: authMeStatus, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]))
+                return (Data(authMeBody.utf8), response)
+            }
+            if url.absoluteString == Self.dashboardURL {
+                #expect(sessionSucceeded)
+                #expect(request.value(forHTTPHeaderField: "Cookie") == cookie)
+                let response = try #require(HTTPURLResponse(
+                    url: url, statusCode: dashboardStatus, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]))
+                return (Data(dashboardBody.utf8), response)
             }
             #expect(url.absoluteString == "https://hyper.charm.land/v1/credits")
             #expect(request.httpMethod == "GET")
@@ -322,6 +408,42 @@ struct HyperPluginTests {
             #expect(requests.urls == expectedRequests)
         }
         return result.usage
+    }
+}
+
+private final class HyperSessionTrace: @unchecked Sendable {
+    let candidates: [ProviderPluginCookieSession]
+    private let lock = NSLock()
+    private var index = 0
+    private var requests: [String] = []
+    private var rejections: [String] = []
+
+    init(headers: [String]) {
+        self.candidates = headers.map {
+            ProviderPluginCookieSession(header: $0, source: "Fixture", origin: "https://hyper.charm.land")
+        }
+    }
+
+    func next() -> ProviderPluginCookieSession? {
+        self.lock.withLock {
+            guard self.index < self.candidates.count else { return nil }
+            defer { self.index += 1 }
+            return self.candidates[self.index]
+        }
+    }
+
+    func request(_ header: String) { self.lock.withLock { self.requests.append(header) } }
+    func reject(_ id: String) { self.lock.withLock { self.rejections.append(id) } }
+    var consumed: Int {
+        self.lock.withLock { self.index }
+    }
+
+    var requested: [String] {
+        self.lock.withLock { self.requests }
+    }
+
+    var rejected: [String] {
+        self.lock.withLock { self.rejections }
     }
 }
 

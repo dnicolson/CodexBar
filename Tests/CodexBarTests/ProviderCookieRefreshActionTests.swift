@@ -27,6 +27,7 @@ struct ProviderCookieRefreshActionTests {
         #expect(picker.binding.wrappedValue == "auto")
 
         let cookie = "JSESSIONID=fixture-hyper-session"
+        let teamID = "11111111-2222-3333-4444-555555555555"
         let web = try #require(HyperProviderDescriptor.spec.webSource)
         let strategy = ScriptFetchStrategy(
             id: "hyper.js",
@@ -34,15 +35,25 @@ struct ProviderCookieRefreshActionTests {
             bundledPlugin: "hyper",
             sourceLabel: "auto",
             transport: ProviderHTTPTransportHandler { request in
-                #expect(request.url?.absoluteString == "https://hyper.charm.land/")
+                let url = try #require(request.url)
                 #expect(request.value(forHTTPHeaderField: "Cookie") == cookie)
                 #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
-                let url = try #require(URL(
-                    string: "https://hyper.charm.land/teams/11111111-2222-3333-4444-555555555555/dashboard"))
+                if url.absoluteString == "https://hyper.charm.land/auth/me" {
+                    let response = try #require(HTTPURLResponse(
+                        url: url,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]))
+                    let body = #"{"authenticated":true,"teams":[{"id":"\#(teamID)","name":"Fixture","role":"owner"}]}"#
+                    return (Data(body.utf8), response)
+                }
+                #expect(url.absoluteString == "https://hyper.charm.land/teams/\(teamID)/dashboard")
                 let response = try #require(HTTPURLResponse(
-                    url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html"]))
-                let html = #"<p>Hypercredits Available</p><p class="text-5xl font-bold">100</p>"#
-                return (Data(html.utf8), response)
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]))
+                return (Data(#"{"remaining":60,"prepaid":40}"#.utf8), response)
             },
             cookieImport: { _, domain, batch in
                 #expect(domain == "hyper.charm.land")

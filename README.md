@@ -136,7 +136,7 @@ See [CLI configuration](docs/cli-configuration.md) for the full flow.
 - [Mistral](docs/mistral.md) — Browser cookies for API spend, credit balance, and monthly-plan usage.
 - [DeepSeek](docs/deepseek.md) — API key for credit balance tracking (paid vs. granted breakdown).
 - [Fireworks](docs/fireworks.md) — API key + account slug for 30-day spend from the billing summary API.
-- [Charm Hyper](docs/hyper.md) — Bundled plugin for native Hypercredit balance, using Chrome/manual sessions with API-key fallback.
+- [Charm Hyper](docs/hyper.md) — Bundled plugin for native Hypercredit balance, using browser/manual sessions with API-key fallback.
 - [DeepInfra](docs/deepinfra.md) — API key for prepaid balance, current-month spend, and spending-limit tracking.
 - [Moonshot / Kimi API](docs/moonshot.md) — API key for Moonshot/Kimi API account balance tracking.
 - [Venice](docs/venice.md) — API key for DIEM or USD balance tracking.
