@@ -4,14 +4,27 @@ import Testing
 @testable import CodexBarCore
 
 struct KiroRegionalEnrichmentTests {
-    @Test
-    func `missing CLI state does not invent a connectivity endpoint`() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let missingDatabase = directory.appendingPathComponent("data.sqlite3")
-        #expect(throws: KiroUsageLimitsError.self) {
-            try KiroUsageLimitsAPI.usageEndpoint(databaseURL: missingDatabase)
+    @Test(arguments: ["us-east-1", "eu-central-1"])
+    func `background reachability uses the profile region without sending credentials`(region: String) async throws {
+        let database = try self.makeDatabase(
+            profileARN: "arn:aws:codewhisperer:\(region):123456789012:profile/test-profile")
+        defer { try? FileManager.default.removeItem(at: database.deletingLastPathComponent()) }
+        let original = try Data(contentsOf: database)
+        let transport = ProviderHTTPTransportStub { request in
+            let url = try #require(request.url)
+            let response = try #require(HTTPURLResponse(
+                url: url, statusCode: 403, httpVersion: nil, headerFields: nil))
+            return (Data(), response)
         }
-        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        try await KiroUsageLimitsAPI.ensureReachable(databaseURL: database, transport: transport)
+        let request = try #require(await transport.requests().first)
+        #expect(request.url?.absoluteString == (region == "us-east-1"
+                ? "https://codewhisperer.us-east-1.amazonaws.com/"
+                : "https://q.eu-central-1.amazonaws.com/"))
+        #expect(request.httpMethod == "HEAD")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(request.httpBody == nil)
+        #expect(try Data(contentsOf: database) == original)
     }
 
     @Test(arguments: ["us-east-1", "eu-central-1"])
@@ -20,9 +33,6 @@ struct KiroRegionalEnrichmentTests {
         let database = try self.makeDatabase(profileARN: arn)
         defer { try? FileManager.default.removeItem(at: database.deletingLastPathComponent()) }
         let original = try Data(contentsOf: database)
-        #expect(try KiroUsageLimitsAPI.usageEndpoint(databaseURL: database).absoluteString == (region == "us-east-1"
-                ? "https://codewhisperer.us-east-1.amazonaws.com/"
-                : "https://q.eu-central-1.amazonaws.com/"))
         let transport = ProviderHTTPTransportStub { request in
             let requestURL = try #require(request.url)
             let response = try #require(HTTPURLResponse(
@@ -67,9 +77,6 @@ struct KiroRegionalEnrichmentTests {
         let database = try self.makeDatabase(profileARN: arn)
         defer { try? FileManager.default.removeItem(at: database.deletingLastPathComponent()) }
         let transport = ProviderHTTPTransportStub { _ in throw CancellationError() }
-        #expect(throws: KiroUsageLimitsError.self) {
-            try KiroUsageLimitsAPI.usageEndpoint(databaseURL: database)
-        }
         do {
             _ = try await KiroUsageLimitsAPI.fetch(databaseURL: database, transport: transport)
             Issue.record("Invalid profile unexpectedly fetched usage")

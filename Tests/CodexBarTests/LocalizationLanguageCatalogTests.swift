@@ -47,6 +47,7 @@ struct LocalizationLanguageCatalogTests {
             "merged_icon_source_highest_usage",
             "merged_icon_source_subtitle",
             "merged_icon_source_title",
+            "menu_bar_layout_show_window_labels",
             "spend_performance_cache_help",
             "spend_performance_cached_input",
             "spend_performance_coverage",
@@ -752,7 +753,9 @@ struct LocalizationLanguageCatalogTests {
             "Flash",
             "Flash Lite",
             "Gateway URL",
+            "Gemini CLI",
             "Gemini Flash",
+            "Gemini app",
             "GitHub",
             "GitHub cookies",
             "Google OAuth",
@@ -977,6 +980,22 @@ extension LocalizationLanguageCatalogTests {
 
 extension LocalizationLanguageCatalogTests {
     @Test
+    func `Gemini app quota guidance is translated in every catalog`() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let resources = root.appendingPathComponent("Sources/CodexBar/Resources")
+        let key = "Gemini app limits use your browser account and are separate from Gemini CLI quotas."
+        for language in AppLanguage.allCases where language != .system && language != .english {
+            let url = resources.appendingPathComponent("\(language.rawValue).lproj/Localizable.strings")
+            let catalog = try #require(NSDictionary(contentsOf: url) as? [String: String])
+            let phrase = try #require(catalog[key], "Missing \(language.rawValue): \(key)")
+            #expect(!phrase.isEmpty)
+            #expect(phrase != key, "Untranslated \(language.rawValue): \(key)")
+            #expect(catalog["Gemini CLI"] == "Gemini CLI")
+        }
+    }
+
+    @Test
     func `credential expiry settings and alerts are translated in every language`() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -1010,7 +1029,7 @@ extension LocalizationLanguageCatalogTests {
     @Test
     func `settings sharing and sync prose do not fall back to English in supported languages`() {
         let keys = [
-            "Usage data will appear once the app refreshes.",
+            "%@ is unavailable. Edit the widget to choose a provider.",
             "No synced Macs yet.",
             "Sync settings and providers across your Macs via iCloud",
             "Hide native Codex when OpenCodex is present",

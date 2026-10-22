@@ -177,10 +177,19 @@ public enum KiroUsageLimitsAPI: Sendable {
         return try self.parse(data)
     }
 
-    /// Uses the CLI's existing regional routing without guessing a host if its private state changes.
-    static func usageEndpoint(databaseURL: URL) throws -> URL {
-        let identity = try self.readIdentity(databaseURL: databaseURL)
-        return try self.usageEndpoint(profileARN: identity.profileARN)
+    static func ensureReachable(
+        databaseURL: URL = stateDatabaseURL(),
+        transport: any ProviderHTTPTransport = isolatedTransport) async throws
+    {
+        try Task.checkCancellation()
+        // Missing private CLI state must not bypass the background sign-in guard.
+        let endpoint = (try? self.usageEndpoint(profileARN: self.readIdentity(databaseURL: databaseURL).profileARN))
+            ?? self.profileEndpoints["us-east-1"]!
+        var request = URLRequest(url: endpoint, timeoutInterval: 4)
+        request.httpMethod = "HEAD"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        // Any HTTP response proves reachability; propagate transport failures for shared snapshot preservation.
+        _ = try await transport.data(for: request)
     }
 
     private static func usageEndpoint(profileARN: String) throws -> URL {
@@ -286,6 +295,9 @@ public enum KiroUsageLimitsAPI: Sendable {
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
+        #if !os(Linux)
+        configuration.waitsForConnectivity = false
+        #endif
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return ProviderHTTPClient(session: ProviderHTTPClient.redirectGuardedSession(configuration: configuration))
     }()
